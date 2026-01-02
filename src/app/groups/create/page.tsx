@@ -8,7 +8,7 @@ export default function CreateGroupPage() {
         <CardHeader>
           <CardTitle className="text-2xl font-headline">Create a New Group</CardTitle>
           <CardDescription>
-            Give your group a name and add yourself as the first member. You can invite others later.
+            Give your group a name. You'll be added as the first member.
           </CardDescription>
         </CardHeader>
         <CardContent>

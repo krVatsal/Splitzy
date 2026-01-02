@@ -3,9 +3,11 @@ import { GroupCard } from '@/components/GroupCard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import Link from 'next/link';
 import { PlusCircle } from 'lucide-react';
+import { getCurrentUser } from '@/lib/auth';
 
 export default async function Home() {
-  const groups = await db.getGroups();
+  const user = await getCurrentUser();
+  const groups = user ? await db.getGroupsForUser(user.id) : [];
 
   return (
     <div className="space-y-8">

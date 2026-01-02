@@ -1,3 +1,10 @@
+export type User = {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl: string;
+}
+
 export type Member = {
   id: string;
   name: string;
@@ -11,7 +18,6 @@ export type Split = {
 
 export type Expense = {
   id:string;
-  groupId: string;
   description: string;
   amount: number; // in cents
   paidById: string;
@@ -23,6 +29,7 @@ export type Group = {
   id: string;
   name: string;
   inviteCode: string;
+  memberIds: string[];
   members: Member[];
   expenses: Expense[];
   createdAt: string;

@@ -4,18 +4,66 @@ import { z } from 'zod';
 import { db } from './db';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import type { Split } from './types';
+import type { Split, User } from './types';
+import { cookies } from 'next/headers';
+
+// --- USER ACTIONS ---
+
+const UserAuthSchema = z.object({
+  email: z.string().email("Please enter a valid email address."),
+  name: z.string().min(2, "Name must be at least 2 characters."),
+});
+
+async function getAuthenticatedUser(): Promise<User | null> {
+    const userEmail = cookies().get('user_email')?.value;
+    if (!userEmail) return null;
+    return await db.getUserByEmail(userEmail);
+}
+
+export async function loginOrRegister(prevState: any, formData: FormData) {
+    const validatedFields = UserAuthSchema.safeParse({
+        email: formData.get('email'),
+        name: formData.get('name'),
+    });
+
+    if (!validatedFields.success) {
+        return {
+            errors: validatedFields.error.flatten().fieldErrors,
+            message: 'Invalid form data.',
+        };
+    }
+    
+    const { email, name } = validatedFields.data;
+    
+    let user = await db.getUserByEmail(email);
+    if (!user) {
+        user = await db.createUser(name, email);
+    }
+
+    cookies().set('user_email', user.email, { httpOnly: true, path: '/' });
+    
+    redirect('/');
+}
+
+export async function logout() {
+    cookies().delete('user_email');
+    redirect('/login');
+}
+
+
+// --- GROUP ACTIONS ---
 
 // Schema for creating a group
 const CreateGroupSchema = z.object({
   groupName: z.string().min(3, "Group name must be at least 3 characters."),
-  yourName: z.string().min(2, "Your name must be at least 2 characters."),
 });
 
 export async function createGroup(prevState: any, formData: FormData) {
+  const user = await getAuthenticatedUser();
+  if (!user) return { message: 'You must be logged in to create a group.' };
+
   const validatedFields = CreateGroupSchema.safeParse({
     groupName: formData.get('groupName'),
-    yourName: formData.get('yourName'),
   });
 
   if (!validatedFields.success) {
@@ -25,11 +73,11 @@ export async function createGroup(prevState: any, formData: FormData) {
     };
   }
 
-  const { groupName, yourName } = validatedFields.data;
+  const { groupName } = validatedFields.data;
 
   let newGroup;
   try {
-    newGroup = await db.createGroup(groupName, yourName);
+    newGroup = await db.createGroup(groupName, user);
   } catch (error) {
     return {
       message: 'Failed to create group.',
@@ -42,13 +90,14 @@ export async function createGroup(prevState: any, formData: FormData) {
 
 // Schema for joining a group
 const JoinGroupSchema = z.object({
-  yourName: z.string().min(2, "Your name must be at least 2 characters."),
   groupId: z.string(),
 });
 
 export async function joinGroup(prevState: any, formData: FormData) {
+    const user = await getAuthenticatedUser();
+    if (!user) return { message: 'You must be logged in to join a group.' };
+
     const validatedFields = JoinGroupSchema.safeParse({
-        yourName: formData.get('yourName'),
         groupId: formData.get('groupId'),
     });
 
@@ -59,10 +108,10 @@ export async function joinGroup(prevState: any, formData: FormData) {
         };
     }
 
-    const { yourName, groupId } = validatedFields.data;
+    const { groupId } = validatedFields.data;
     
     try {
-        await db.addMemberToGroup(groupId, yourName);
+        await db.addMemberToGroup(groupId, user);
     } catch(error) {
         return { message: 'Failed to join group.' };
     }
@@ -134,7 +183,7 @@ export async function addExpense(prevState: any, formData: FormData) {
     // Check if splits add up to the total amount
     if (Math.abs(splitTotal - totalAmountCents) > 1) { // Allow for small rounding differences
         return {
-            message: `Splits total (${formatCurrency(splitTotal)}) does not match the expense amount (${formatCurrency(totalAmountCents)}).`,
+            message: `Splits total (${formatCurrency(splitTotal / 100)}) does not match the expense amount (${formatCurrency(totalAmountCents/100)}).`,
         };
     }
 
@@ -153,8 +202,7 @@ export async function addExpense(prevState: any, formData: FormData) {
     return { message: 'Expense added successfully.', success: true };
 }
 
-function formatCurrency(amountInCents: number) {
-    const amount = amountInCents / 100;
+function formatCurrency(amount: number) {
     return new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency: 'USD',

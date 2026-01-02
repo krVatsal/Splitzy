@@ -2,8 +2,6 @@
 
 import { useFormState, useFormStatus } from 'react-dom';
 import { joinGroup } from '@/lib/actions';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
@@ -39,13 +37,7 @@ export function JoinGroupForm({ groupId }: { groupId: string }) {
   return (
     <form action={dispatch} className="space-y-6">
       <input type="hidden" name="groupId" value={groupId} />
-      <div className="space-y-2">
-        <Label htmlFor="yourName">Your Name</Label>
-        <Input id="yourName" name="yourName" placeholder="Enter your name" required aria-describedby="yourName-error" />
-        <div id="yourName-error" aria-live="polite" aria-atomic="true">
-          {state?.errors?.yourName && <p className="text-sm font-medium text-destructive">{state.errors.yourName[0]}</p>}
-        </div>
-      </div>
+      <p className="text-sm text-center text-muted-foreground">You will be added to this group.</p>
       <SubmitButton />
     </form>
   );

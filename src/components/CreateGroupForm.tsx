@@ -27,7 +27,7 @@ export function CreateGroupForm() {
   const { toast } = useToast();
 
   useEffect(() => {
-    if (state?.message && !state.errors) {
+    if (state?.message) {
         toast({
             variant: "destructive",
             title: "Error",
@@ -45,14 +45,6 @@ export function CreateGroupForm() {
             {state?.errors?.groupName && <p className="text-sm font-medium text-destructive">{state.errors.groupName[0]}</p>}
         </div>
       </div>
-      <div className="space-y-2">
-        <Label htmlFor="yourName">Your Name</Label>
-        <Input id="yourName" name="yourName" placeholder="e.g., Alice" required aria-describedby="yourName-error" />
-        <div id="yourName-error" aria-live="polite" aria-atomic="true">
-            {state?.errors?.yourName && <p className="text-sm font-medium text-destructive">{state.errors.yourName[0]}</p>}
-        </div>
-      </div>
-      
       <SubmitButton />
     </form>
   );

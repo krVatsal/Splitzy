@@ -1,69 +1,116 @@
 import { firestore } from './firebase';
-import type { Group, Expense, Member } from './types';
+import type { Group, Expense, Member, User } from './types';
+import { v4 as uuidv4 } from 'uuid';
 
 const GROUPS_COLLECTION = 'groups';
+const USERS_COLLECTION = 'users';
 
 // Simulate database latency
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 export const db = {
-  getGroups: async (): Promise<Group[]> => {
+  // USER-related functions
+  getUserById: async (id: string): Promise<User | null> => {
     await delay(100);
-    const snapshot = await firestore.collection(GROUPS_COLLECTION).get();
-    const groups = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group));
-    return groups;
+    const doc = await firestore.collection(USERS_COLLECTION).doc(id).get();
+    if (!doc.exists) return null;
+    return { id: doc.id, ...doc.data() } as User;
   },
+
+  getUserByEmail: async (email: string): Promise<User | null> => {
+    await delay(100);
+    const snapshot = await firestore.collection(USERS_COLLECTION).where('email', '==', email).limit(1).get();
+    if (snapshot.empty) return null;
+    const doc = snapshot.docs[0];
+    return { id: doc.id, ...doc.data() } as User;
+  },
+
+  createUser: async (name: string, email: string): Promise<User> => {
+    await delay(200);
+    const newUser: Omit<User, 'id'> = {
+      name,
+      email,
+      avatarUrl: `https://picsum.photos/seed/${email}/150/150`,
+    };
+    const docRef = await firestore.collection(USERS_COLLECTION).add(newUser);
+    return { id: docRef.id, ...newUser };
+  },
+
+  // GROUP-related functions
+  getGroupsForUser: async (userId: string): Promise<Group[]> => {
+    await delay(100);
+    const snapshot = await firestore.collection(GROUPS_COLLECTION).where('memberIds', 'array-contains', userId).orderBy('createdAt', 'desc').get();
+    const userGroups = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group));
+    
+    // We need to fetch member details for the group cards on the homepage
+    for (const group of userGroups) {
+      const memberPromises = group.memberIds.map(memberId => db.getUserById(memberId));
+      const members = await Promise.all(memberPromises);
+      group.members = members.filter((m): m is User => m !== null).map(m => ({ id: m.id, name: m.name, avatarUrl: m.avatarUrl }));
+    }
+
+    return userGroups;
+  },
+
   getGroupById: async (id: string): Promise<Group | null> => {
     await delay(100);
     const doc = await firestore.collection(GROUPS_COLLECTION).doc(id).get();
     if (!doc.exists) return null;
-    return { id: doc.id, ...doc.data() } as Group;
+    
+    const groupData = doc.data() as Omit<Group, 'id'>;
+    const memberPromises = groupData.memberIds.map(memberId => db.getUserById(memberId));
+    const memberDocs = await Promise.all(memberPromises);
+    
+    const members: Member[] = memberDocs
+        .filter((m): m is User => m !== null)
+        .map(user => ({
+            id: user.id,
+            name: user.name,
+            avatarUrl: user.avatarUrl,
+        }));
+
+    return { id: doc.id, ...groupData, members } as Group;
   },
+
   getGroupByInviteCode: async (code: string): Promise<Group | null> => {
     await delay(100);
     const snapshot = await firestore.collection(GROUPS_COLLECTION).where('inviteCode', '==', code).limit(1).get();
     if (snapshot.empty) return null;
     const doc = snapshot.docs[0];
-    return { id: doc.id, ...doc.data() } as Group;
+    const groupData = doc.data() as Omit<Group, 'id' | 'members'>;
+     return { id: doc.id, ...groupData, members: [] } as Group; // members will be fetched on group page
   },
-  createGroup: async (name: string, userName: string): Promise<Group> => {
+
+  createGroup: async (name: string, user: User): Promise<Group> => {
     await delay(200);
-    const userId = Date.now();
-    const newMember: Member = {
-        id: `user-${userId}`,
-        name: userName,
-        avatarUrl: `https://picsum.photos/seed/${userId}/150/150`
-    };
-    const newGroupData = {
+    const newGroupData: Omit<Group, 'id' | 'members'> = {
       name,
       inviteCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
       createdAt: new Date().toISOString(),
-      members: [newMember],
+      memberIds: [user.id],
       expenses: [],
     };
     const docRef = await firestore.collection(GROUPS_COLLECTION).add(newGroupData);
-    return { id: docRef.id, ...newGroupData } as Group;
+    
+    return { id: docRef.id, ...newGroupData, members: [{id: user.id, name: user.name, avatarUrl: user.avatarUrl}] } as Group;
   },
-  addMemberToGroup: async (groupId: string, userName: string): Promise<Group> => {
+
+  addMemberToGroup: async (groupId: string, user: User): Promise<void> => {
     await delay(200);
     const groupRef = firestore.collection(GROUPS_COLLECTION).doc(groupId);
     const groupDoc = await groupRef.get();
     if (!groupDoc.exists) throw new Error('Group not found');
 
     const group = groupDoc.data() as Group;
-    const userId = Date.now();
-    const newMember: Member = {
-        id: `user-${userId}`,
-        name: userName,
-        avatarUrl: `https://picsum.photos/seed/${userId}/150/150`
-    };
+    if (group.memberIds.includes(user.id)) {
+        return; // User is already a member
+    }
 
-    const updatedMembers = [...(group.members || []), newMember];
-    await groupRef.update({ members: updatedMembers });
-
-    return { ...group, id: groupId, members: updatedMembers };
+    const updatedMemberIds = [...(group.memberIds || []), user.id];
+    await groupRef.update({ memberIds: updatedMemberIds });
   },
-  addExpenseToGroup: async (groupId: string, expenseData: Omit<Expense, 'id' | 'groupId' | 'createdAt'>): Promise<Expense> => {
+
+  addExpenseToGroup: async (groupId: string, expenseData: Omit<Expense, 'id' | 'createdAt'>): Promise<Expense> => {
     await delay(200);
     const groupRef = firestore.collection(GROUPS_COLLECTION).doc(groupId);
     const groupDoc = await groupRef.get();
@@ -72,8 +119,7 @@ export const db = {
     const group = groupDoc.data() as Group;
     const newExpense: Expense = {
       ...expenseData,
-      id: `exp-${Date.now()}`,
-      groupId,
+      id: uuidv4(),
       createdAt: new Date().toISOString(),
     };
     

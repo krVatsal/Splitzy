@@ -2,17 +2,21 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
 import { Header } from '@/components/Header';
+import { getCurrentUser } from '@/lib/auth';
+import { redirect } from 'next/navigation';
 
 export const metadata: Metadata = {
   title: 'Splitzy',
   description: 'A robust expense-splitting app for groups.',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const user = await getCurrentUser();
+
   return (
     <html lang="en" className="h-full">
       <head>
@@ -23,9 +27,9 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="font-body antialiased h-full">
+      <body className="font-body antialiased h-full bg-background">
         <div className="flex flex-col min-h-screen">
-          <Header />
+          {user && <Header />}
           <main className="flex-grow container mx-auto px-4 py-8">
             {children}
           </main>
