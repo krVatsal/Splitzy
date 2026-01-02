@@ -141,11 +141,12 @@ export async function addExpense(prevState: any, formData: FormData) {
         return {
             errors: validatedFields.error.flatten().fieldErrors,
             message: 'Invalid expense data.',
+            success: false,
         };
     }
     
     const group = await db.getGroupById(validatedFields.data.groupId);
-    if (!group) return { message: 'Group not found.' };
+    if (!group) return { message: 'Group not found.', success: false };
 
     const totalAmountCents = Math.round(validatedFields.data.amount * 100);
     const splits: Split[] = [];
@@ -153,37 +154,55 @@ export async function addExpense(prevState: any, formData: FormData) {
 
     const splitType = formData.get('splitType');
 
-    if(splitType === 'equally') {
-        const memberCount = group.members.length;
+    const distributeAmount = (memberIds: string[]) => {
+        const memberCount = memberIds.length;
         if (memberCount === 0) {
-            return { message: 'Cannot split expense, no members in the group.' };
+            return;
         }
         const share = Math.floor(totalAmountCents / memberCount);
         let remainder = totalAmountCents % memberCount;
 
-        for(const member of group.members) {
+        for(const memberId of memberIds) {
             let memberShare = share;
             if (remainder > 0) {
                 memberShare++;
                 remainder--;
             }
-            splits.push({ memberId: member.id, amount: memberShare });
+            splits.push({ memberId: memberId, amount: memberShare });
         }
-        splitTotal = splits.reduce((acc, s) => acc + s.amount, 0);
-
-    } else { // Custom split
+    };
+    
+    if (splitType === 'equally') {
+        distributeAmount(group.members.map(m => m.id));
+    } else if (splitType === 'unequally') {
+        const selectedMembers = formData.getAll('selectedMembers') as string[];
+        if (selectedMembers.length === 0) {
+            return { message: 'You must select at least one person to split the expense with.', success: false };
+        }
+        distributeAmount(selectedMembers);
+        // For members not selected, their split is 0
+        group.members.forEach(member => {
+            if (!selectedMembers.includes(member.id)) {
+                splits.push({ memberId: member.id, amount: 0 });
+            }
+        });
+    } else if (splitType === 'custom') {
         for (const member of group.members) {
             const splitAmount = formData.get(`split-${member.id}`);
             const splitAmountCents = Math.round(Number(splitAmount || 0) * 100);
             splits.push({ memberId: member.id, amount: splitAmountCents });
-            splitTotal += splitAmountCents;
         }
+    } else {
+        return { message: 'Invalid split type.', success: false };
     }
     
+    splitTotal = splits.reduce((acc, s) => acc + s.amount, 0);
+
     // Check if splits add up to the total amount
     if (Math.abs(splitTotal - totalAmountCents) > 1) { // Allow for small rounding differences
         return {
             message: `Splits total (${formatCurrency(splitTotal / 100)}) does not match the expense amount (${formatCurrency(totalAmountCents/100)}).`,
+            success: false,
         };
     }
 
@@ -195,7 +214,7 @@ export async function addExpense(prevState: any, formData: FormData) {
             splits,
         });
     } catch(e) {
-        return { message: 'Failed to add expense.' };
+        return { message: 'Failed to add expense.', success: false };
     }
 
     revalidatePath(`/groups/${validatedFields.data.groupId}`);

@@ -3,7 +3,7 @@
 import { addExpense } from '@/lib/actions';
 import { useFormState, useFormStatus } from 'react-dom';
 import { useEffect, useState, useMemo } from 'react';
-import type { Group } from '@/lib/types';
+import type { Group, Member } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription, DialogClose } from '@/components/ui/dialog';
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { formatCurrency } from '@/lib/calculations';
 import { ScrollArea } from '../ui/scroll-area';
+import { Checkbox } from '../ui/checkbox';
 
 const initialState = { message: null, errors: {}, success: false };
 
@@ -31,6 +32,8 @@ export function AddExpenseForm({ group, isOpen, onOpenChange }: { group: Group; 
     const [splitType, setSplitType] = useState('equally');
     const [totalAmount, setTotalAmount] = useState(0);
     const [customSplits, setCustomSplits] = useState<Record<string, number>>({});
+    const [selectedMembers, setSelectedMembers] = useState<string[]>(group.members.map(m => m.id));
+
 
     const totalCustomSplit = useMemo(() => {
         return Object.values(customSplits).reduce((sum, amount) => sum + amount, 0);
@@ -51,13 +54,38 @@ export function AddExpenseForm({ group, isOpen, onOpenChange }: { group: Group; 
                 setSplitType('equally');
                 setTotalAmount(0);
                 setCustomSplits({});
+                setSelectedMembers(group.members.map(m => m.id));
             }
         }
-    }, [state, toast, onOpenChange]);
+    }, [state, toast, onOpenChange, group.members]);
+    
+    useEffect(() => {
+      // Reset selections when modal opens or group changes
+      setSelectedMembers(group.members.map(m => m.id));
+      setSplitType('equally');
+    }, [isOpen, group.members]);
 
     const handleCustomSplitChange = (memberId: string, value: string) => {
         setCustomSplits(prev => ({ ...prev, [memberId]: Number(value) || 0 }));
     };
+
+    const handleMemberSelect = (memberId: string, isSelected: boolean) => {
+        setSelectedMembers(prev => {
+            if (isSelected) {
+                return [...prev, memberId];
+            } else {
+                return prev.filter(id => id !== memberId);
+            }
+        });
+    };
+    
+    const handleSplitTypeChange = (value: string) => {
+        setSplitType(value);
+        if (value === 'unequally') {
+            // By default, select all members when switching to unequal split
+            setSelectedMembers(group.members.map(m => m.id));
+        }
+    }
 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -96,10 +124,14 @@ export function AddExpenseForm({ group, isOpen, onOpenChange }: { group: Group; 
                     
                     <div className="space-y-2">
                         <Label>Split</Label>
-                        <RadioGroup name="splitType" defaultValue="equally" onValueChange={setSplitType} className="flex gap-4">
+                        <RadioGroup name="splitType" value={splitType} onValueChange={handleSplitTypeChange} className="flex flex-wrap gap-4">
                             <div className="flex items-center space-x-2">
                                 <RadioGroupItem value="equally" id="equally" />
                                 <Label htmlFor="equally">Equally</Label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                                <RadioGroupItem value="unequally" id="unequally" />
+                                <Label htmlFor="unequally">Select People</Label>
                             </div>
                             <div className="flex items-center space-x-2">
                                 <RadioGroupItem value="custom" id="custom" />
@@ -107,6 +139,33 @@ export function AddExpenseForm({ group, isOpen, onOpenChange }: { group: Group; 
                             </div>
                         </RadioGroup>
                     </div>
+
+                    {splitType === 'unequally' && (
+                        <div className="space-y-3 rounded-md border p-4">
+                            <div className="flex justify-between items-center mb-2">
+                                <h4 className="font-medium">Split between</h4>
+                                <p className="text-sm text-muted-foreground">
+                                    {selectedMembers.length} of {group.members.length} people
+                                </p>
+                            </div>
+                            <ScrollArea className="h-40">
+                                <div className="space-y-3 pr-4">
+                                {group.members.map(member => (
+                                    <div key={member.id} className="flex items-center gap-3">
+                                        <Checkbox 
+                                            id={`member-${member.id}`} 
+                                            name="selectedMembers"
+                                            value={member.id}
+                                            checked={selectedMembers.includes(member.id)}
+                                            onCheckedChange={(checked) => handleMemberSelect(member.id, !!checked)}
+                                        />
+                                        <Label htmlFor={`member-${member.id}`} className="font-normal flex-1 cursor-pointer">{member.name}</Label>
+                                    </div>
+                                ))}
+                                </div>
+                            </ScrollArea>
+                        </div>
+                    )}
 
                     {splitType === 'custom' && (
                         <div className="space-y-3 rounded-md border p-4">
