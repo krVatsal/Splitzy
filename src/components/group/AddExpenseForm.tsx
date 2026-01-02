@@ -157,7 +157,7 @@ export function AddExpenseForm({
 
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                            <Label htmlFor="amount">Amount ($)</Label>
+                            <Label htmlFor="amount">Amount (₹)</Label>
                             <Input id="amount" name="amount" type="number" step="0.01" placeholder="0.00" required value={amount} onChange={(e) => setAmount(Number(e.target.value))} />
                         </div>
                         <div className="space-y-2">

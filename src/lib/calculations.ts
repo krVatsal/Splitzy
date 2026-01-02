@@ -66,8 +66,8 @@ export function simplifyDebts(balances: Balance[]): SimplifiedDebt[] {
 
 export const formatCurrency = (amountInCents: number) => {
     const amount = amountInCents / 100;
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-IN', {
         style: 'currency',
-        currency: 'USD',
+        currency: 'INR',
     }).format(amount);
 };
