@@ -1,3 +1,4 @@
+
 import { firestore } from './firebase';
 import type { Group, Expense, Member, User } from './types';
 import { v4 as uuidv4 } from 'uuid';
@@ -44,9 +45,13 @@ export const db = {
     
     // We need to fetch member details for the group cards on the homepage
     for (const group of userGroups) {
-      const memberPromises = group.memberIds.map(memberId => db.getUserById(memberId));
-      const members = await Promise.all(memberPromises);
-      group.members = members.filter((m): m is User => m !== null).map(m => ({ id: m.id, name: m.name, avatarUrl: m.avatarUrl }));
+      if (group.memberIds) {
+        const memberPromises = group.memberIds.map(memberId => db.getUserById(memberId));
+        const members = await Promise.all(memberPromises);
+        group.members = members.filter((m): m is User => m !== null).map(m => ({ id: m.id, name: m.name, avatarUrl: m.avatarUrl }));
+      } else {
+        group.members = [];
+      }
     }
 
     return userGroups;
@@ -58,6 +63,11 @@ export const db = {
     if (!doc.exists) return null;
     
     const groupData = doc.data() as Omit<Group, 'id'>;
+
+    if (!groupData.memberIds) {
+        groupData.memberIds = [];
+    }
+
     const memberPromises = groupData.memberIds.map(memberId => db.getUserById(memberId));
     const memberDocs = await Promise.all(memberPromises);
     
@@ -102,7 +112,7 @@ export const db = {
     if (!groupDoc.exists) throw new Error('Group not found');
 
     const group = groupDoc.data() as Group;
-    if (group.memberIds.includes(user.id)) {
+    if (group.memberIds && group.memberIds.includes(user.id)) {
         return; // User is already a member
     }
 
