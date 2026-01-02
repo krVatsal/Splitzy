@@ -1,3 +1,4 @@
+
 export type User = {
   id: string;
   name: string;
@@ -16,13 +17,23 @@ export type Split = {
   amount: number; // in cents
 };
 
+export type Comment = {
+  id: string;
+  authorId: string;
+  authorName: string;
+  text: string;
+  createdAt: string;
+};
+
 export type Expense = {
   id:string;
   description: string;
   amount: number; // in cents
   paidById: string;
+  authorId: string;
   splits: Split[];
   createdAt: string;
+  comments?: Comment[];
 };
 
 export type Group = {

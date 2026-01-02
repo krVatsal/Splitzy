@@ -1,6 +1,6 @@
 
 import { firestore } from './firebase';
-import type { Group, Expense, Member, User } from './types';
+import type { Group, Expense, Member, User, Comment } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
 const GROUPS_COLLECTION = 'groups';
@@ -43,7 +43,6 @@ export const db = {
     const snapshot = await firestore.collection(GROUPS_COLLECTION).where('memberIds', 'array-contains', userId).orderBy('createdAt', 'desc').get();
     const userGroups = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group));
     
-    // We need to fetch member details for the group cards on the homepage
     for (const group of userGroups) {
       if (group.memberIds) {
         const memberPromises = group.memberIds.map(memberId => db.getUserById(memberId));
@@ -88,7 +87,7 @@ export const db = {
     if (snapshot.empty) return null;
     const doc = snapshot.docs[0];
     const groupData = doc.data() as Omit<Group, 'id' | 'members'>;
-     return { id: doc.id, ...groupData, members: [] } as Group; // members will be fetched on group page
+     return { id: doc.id, ...groupData, members: [] } as Group;
   },
 
   createGroup: async (name: string, user: User): Promise<Group> => {
@@ -113,7 +112,7 @@ export const db = {
 
     const group = groupDoc.data() as Group;
     if (group.memberIds && group.memberIds.includes(user.id)) {
-        return; // User is already a member
+        return; 
     }
 
     const updatedMemberIds = [...(group.memberIds || []), user.id];
@@ -131,11 +130,63 @@ export const db = {
       ...expenseData,
       id: uuidv4(),
       createdAt: new Date().toISOString(),
+      comments: [],
     };
     
     const updatedExpenses = [...(group.expenses || []), newExpense];
     await groupRef.update({ expenses: updatedExpenses });
 
     return newExpense;
+  },
+  
+  updateExpenseInGroup: async (groupId: string, updatedExpense: Expense): Promise<void> => {
+    await delay(200);
+    const groupRef = firestore.collection(GROUPS_COLLECTION).doc(groupId);
+    const groupDoc = await groupRef.get();
+    if (!groupDoc.exists) throw new Error('Group not found');
+    const group = groupDoc.data() as Group;
+
+    const expenseIndex = group.expenses.findIndex(e => e.id === updatedExpense.id);
+    if (expenseIndex === -1) throw new Error('Expense not found');
+
+    const updatedExpenses = [...group.expenses];
+    updatedExpenses[expenseIndex] = updatedExpense;
+
+    await groupRef.update({ expenses: updatedExpenses });
+  },
+
+  deleteExpenseFromGroup: async (groupId: string, expenseId: string, userId: string): Promise<void> => {
+    await delay(200);
+    const groupRef = firestore.collection(GROUPS_COLLECTION).doc(groupId);
+    const groupDoc = await groupRef.get();
+    if (!groupDoc.exists) throw new Error('Group not found');
+    const group = groupDoc.data() as Group;
+
+    const expense = group.expenses.find(e => e.id === expenseId);
+    if (!expense) return; // Expense already deleted or never existed
+    if (expense.authorId !== userId) {
+      throw new Error('You do not have permission to delete this expense.');
+    }
+
+    const updatedExpenses = group.expenses.filter(e => e.id !== expenseId);
+    await groupRef.update({ expenses: updatedExpenses });
+  },
+
+  addCommentToExpense: async (groupId: string, expenseId: string, comment: Comment): Promise<void> => {
+    await delay(200);
+    const groupRef = firestore.collection(GROUPS_COLLECTION).doc(groupId);
+    const groupDoc = await groupRef.get();
+    if (!groupDoc.exists) throw new Error('Group not found');
+    const group = groupDoc.data() as Group;
+
+    const expenseIndex = group.expenses.findIndex(e => e.id === expenseId);
+    if (expenseIndex === -1) throw new Error('Expense not found');
+
+    const updatedExpenses = [...group.expenses];
+    const expense = updatedExpenses[expenseIndex];
+    const updatedComments = [...(expense.comments || []), comment];
+    updatedExpenses[expenseIndex] = { ...expense, comments: updatedComments };
+
+    await groupRef.update({ expenses: updatedExpenses });
   },
 };

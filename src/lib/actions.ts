@@ -1,11 +1,13 @@
+
 'use server';
 
 import { z } from 'zod';
 import { db } from './db';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import type { Split, User } from './types';
+import type { Split, User, Comment, Expense } from './types';
 import { cookies } from 'next/headers';
+import { v4 as uuidv4 } from 'uuid';
 
 // --- USER ACTIONS ---
 
@@ -129,29 +131,8 @@ const AddExpenseSchema = z.object({
     groupId: z.string(),
 });
 
-export async function addExpense(prevState: any, formData: FormData) {
-    const validatedFields = AddExpenseSchema.safeParse({
-        description: formData.get('description'),
-        amount: formData.get('amount'),
-        paidById: formData.get('paidById'),
-        groupId: formData.get('groupId'),
-    });
-
-    if (!validatedFields.success) {
-        return {
-            errors: validatedFields.error.flatten().fieldErrors,
-            message: 'Invalid expense data.',
-            success: false,
-        };
-    }
-    
-    const group = await db.getGroupById(validatedFields.data.groupId);
-    if (!group) return { message: 'Group not found.', success: false };
-
-    const totalAmountCents = Math.round(validatedFields.data.amount * 100);
+const calculateSplits = (formData: FormData, totalAmountCents: number, members: User[]): Split[] => {
     const splits: Split[] = [];
-    let splitTotal = 0;
-
     const splitType = formData.get('splitType');
 
     const distributeAmount = (memberIds: string[]) => {
@@ -173,53 +154,169 @@ export async function addExpense(prevState: any, formData: FormData) {
     };
     
     if (splitType === 'equally') {
-        distributeAmount(group.members.map(m => m.id));
+        distributeAmount(members.map(m => m.id));
     } else if (splitType === 'unequally') {
         const selectedMembers = formData.getAll('selectedMembers') as string[];
         if (selectedMembers.length === 0) {
-            return { message: 'You must select at least one person to split the expense with.', success: false };
+            throw new Error('You must select at least one person to split the expense with.');
         }
         distributeAmount(selectedMembers);
-        // For members not selected, their split is 0
-        group.members.forEach(member => {
+        members.forEach(member => {
             if (!selectedMembers.includes(member.id)) {
                 splits.push({ memberId: member.id, amount: 0 });
             }
         });
     } else if (splitType === 'custom') {
-        for (const member of group.members) {
+        for (const member of members) {
             const splitAmount = formData.get(`split-${member.id}`);
             const splitAmountCents = Math.round(Number(splitAmount || 0) * 100);
             splits.push({ memberId: member.id, amount: splitAmountCents });
         }
     } else {
-        return { message: 'Invalid split type.', success: false };
+        throw new Error('Invalid split type.');
+    }
+
+    const splitTotal = splits.reduce((acc, s) => acc + s.amount, 0);
+
+    if (Math.abs(splitTotal - totalAmountCents) > 1) { 
+        throw new Error(`Splits total (${formatCurrency(splitTotal / 100)}) does not match the expense amount (${formatCurrency(totalAmountCents/100)}).`);
+    }
+
+    return splits;
+};
+
+export async function addExpense(prevState: any, formData: FormData) {
+    const user = await getAuthenticatedUser();
+    if (!user) return { message: 'Authentication required.', success: false };
+
+    const validatedFields = AddExpenseSchema.safeParse({
+        description: formData.get('description'),
+        amount: formData.get('amount'),
+        paidById: formData.get('paidById'),
+        groupId: formData.get('groupId'),
+    });
+
+    if (!validatedFields.success) {
+        return { errors: validatedFields.error.flatten().fieldErrors, message: 'Invalid expense data.', success: false };
     }
     
-    splitTotal = splits.reduce((acc, s) => acc + s.amount, 0);
-
-    // Check if splits add up to the total amount
-    if (Math.abs(splitTotal - totalAmountCents) > 1) { // Allow for small rounding differences
-        return {
-            message: `Splits total (${formatCurrency(splitTotal / 100)}) does not match the expense amount (${formatCurrency(totalAmountCents/100)}).`,
-            success: false,
-        };
-    }
+    const group = await db.getGroupById(validatedFields.data.groupId);
+    if (!group) return { message: 'Group not found.', success: false };
 
     try {
+        const totalAmountCents = Math.round(validatedFields.data.amount * 100);
+        const splits = calculateSplits(formData, totalAmountCents, group.members);
+        
         await db.addExpenseToGroup(validatedFields.data.groupId, {
             description: validatedFields.data.description,
             amount: totalAmountCents,
             paidById: validatedFields.data.paidById,
+            authorId: user.id,
             splits,
         });
-    } catch(e) {
-        return { message: 'Failed to add expense.', success: false };
+
+        revalidatePath(`/groups/${validatedFields.data.groupId}`);
+        return { message: 'Expense added successfully.', success: true };
+    } catch(e: any) {
+        return { message: e.message || 'Failed to add expense.', success: false };
+    }
+}
+
+export async function editExpense(prevState: any, formData: FormData) {
+    const user = await getAuthenticatedUser();
+    if (!user) return { message: 'Authentication required.', success: false };
+
+    const expenseId = formData.get('expenseId') as string;
+    const validatedFields = AddExpenseSchema.safeParse({
+        description: formData.get('description'),
+        amount: formData.get('amount'),
+        paidById: formData.get('paidById'),
+        groupId: formData.get('groupId'),
+    });
+
+    if (!validatedFields.success) {
+        return { errors: validatedFields.error.flatten().fieldErrors, message: 'Invalid expense data.', success: false };
     }
 
-    revalidatePath(`/groups/${validatedFields.data.groupId}`);
-    return { message: 'Expense added successfully.', success: true };
+    const group = await db.getGroupById(validatedFields.data.groupId);
+    if (!group) return { message: 'Group not found.', success: false };
+    
+    const expense = group.expenses.find(e => e.id === expenseId);
+    if (!expense || expense.authorId !== user.id) {
+        return { message: 'Expense not found or you do not have permission to edit it.', success: false };
+    }
+
+    try {
+        const totalAmountCents = Math.round(validatedFields.data.amount * 100);
+        const splits = calculateSplits(formData, totalAmountCents, group.members);
+
+        const updatedExpense: Expense = {
+            ...expense,
+            description: validatedFields.data.description,
+            amount: totalAmountCents,
+            paidById: validatedFields.data.paidById,
+            splits: splits
+        };
+
+        await db.updateExpenseInGroup(validatedFields.data.groupId, updatedExpense);
+
+        revalidatePath(`/groups/${validatedFields.data.groupId}`);
+        return { message: 'Expense updated successfully.', success: true };
+
+    } catch (e: any) {
+        return { message: e.message || 'Failed to update expense.', success: false };
+    }
 }
+
+
+export async function deleteExpense(formData: FormData) {
+    const user = await getAuthenticatedUser();
+    if (!user) throw new Error('Authentication required.');
+
+    const groupId = formData.get('groupId') as string;
+    const expenseId = formData.get('expenseId') as string;
+
+    await db.deleteExpenseFromGroup(groupId, expenseId, user.id);
+    revalidatePath(`/groups/${groupId}`);
+}
+
+const AddCommentSchema = z.object({
+  comment: z.string().min(1, 'Comment cannot be empty.'),
+  groupId: z.string(),
+  expenseId: z.string(),
+});
+
+export async function addComment(prevState: any, formData: FormData) {
+    const user = await getAuthenticatedUser();
+    if (!user) return { message: 'Authentication required.', success: false };
+
+    const validatedFields = AddCommentSchema.safeParse({
+        comment: formData.get('comment'),
+        groupId: formData.get('groupId'),
+        expenseId: formData.get('expenseId'),
+    });
+
+    if (!validatedFields.success) {
+        return { errors: validatedFields.error.flatten().fieldErrors, message: 'Invalid comment data.', success: false };
+    }
+
+    try {
+        const { comment, groupId, expenseId } = validatedFields.data;
+        const newComment: Comment = {
+            id: uuidv4(),
+            authorId: user.id,
+            authorName: user.name,
+            text: comment,
+            createdAt: new Date().toISOString(),
+        }
+        await db.addCommentToExpense(groupId, expenseId, newComment);
+        revalidatePath(`/groups/${groupId}`);
+        return { message: 'Comment added.', success: true };
+    } catch (e: any) {
+        return { message: e.message || 'Failed to add comment.', success: false };
+    }
+}
+
 
 function formatCurrency(amount: number) {
     return new Intl.NumberFormat('en-US', {
