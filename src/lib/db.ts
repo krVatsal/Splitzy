@@ -115,20 +115,26 @@ export const db = {
   createGroup: async (name: string, userName: string) => {
     await delay(200);
     const userId = Date.now();
+    const groupId = `group-${groups.length + 1}`;
     const newMember = {
         id: `user-${userId}`,
         name: userName,
         avatarUrl: `https://picsum.photos/seed/${userId}/150/150`
     };
     const newGroup: Group = {
-      id: `group-${Date.now()}`,
+      id: groupId,
       name,
       inviteCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
       createdAt: new Date().toISOString(),
       members: [newMember],
       expenses: [],
     };
-    groups.push(newGroup);
+    
+    // Prevent creating duplicate groups if it already exists
+    if (!groups.find(g => g.id === groupId)) {
+      groups.push(newGroup);
+    }
+    
     return newGroup;
   },
   addMemberToGroup: async (groupId: string, userName: string) => {
