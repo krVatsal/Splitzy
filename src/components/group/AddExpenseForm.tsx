@@ -45,9 +45,9 @@ export function AddExpenseForm({
     const { toast } = useToast();
     
     // Form state
-    const [description, setDescription] = useState(expense?.description || '');
-    const [amount, setAmount] = useState((expense?.amount || 0) / 100);
-    const [paidById, setPaidById] = useState(expense?.paidById || group.members[0]?.id);
+    const [description, setDescription] = useState('');
+    const [amount, setAmount] = useState(0);
+    const [paidById, setPaidById] = useState(group.members[0]?.id);
     const [splitType, setSplitType] = useState('equally');
     const [customSplits, setCustomSplits] = useState<Record<string, number>>({});
     const [selectedMembers, setSelectedMembers] = useState<string[]>(group.members.map(m => m.id));
@@ -62,7 +62,7 @@ export function AddExpenseForm({
         if (state.message) {
             toast({
                 variant: state.success ? 'default' : 'destructive',
-                title: state.success ? (isEditing ? 'Success' : 'Success') : 'Error',
+                title: state.success ? (isEditing ? 'Update Successful' : 'Expense Added') : 'Error',
                 description: state.message,
             });
             if(state.success) {
@@ -74,32 +74,36 @@ export function AddExpenseForm({
     useEffect(() => {
         if (isOpen) {
             if (expense) {
-                // Editing mode
+                // --- EDITING MODE ---
                 const expenseAmount = expense.amount / 100;
                 setDescription(expense.description);
                 setAmount(expenseAmount);
                 setPaidById(expense.paidById);
                 
-                const hasCustomSplits = expense.splits.some(s => s.amount > 0 && expense.splits.filter(sp => sp.amount === s.amount).length === 1) && expense.splits.filter(s => s.amount > 0).length > 1;
-                const areSplitsEqual = new Set(expense.splits.filter(s=> s.amount > 0).map(s => s.amount)).size === 1;
+                const involvedMemberIds = expense.splits.filter(s => s.amount > 0).map(s => s.memberId);
+                const involvedSplits = expense.splits.filter(s => s.amount > 0);
+                const uniqueSplitAmounts = new Set(involvedSplits.map(s => s.amount));
 
-                if (hasCustomSplits && !areSplitsEqual) {
+                if (uniqueSplitAmounts.size > 1) {
                      setSplitType('custom');
                      const custom: Record<string, number> = {};
                      expense.splits.forEach(s => {
-                         const member = group.members.find(m => m.id === s.memberId);
-                         if(member) custom[member.id] = s.amount / 100;
+                        const member = group.members.find(m => m.id === s.memberId);
+                        if(member) custom[member.id] = s.amount / 100;
                      });
                      setCustomSplits(custom);
-                } else if (!areSplitsEqual) {
+                     setSelectedMembers(group.members.map(m => m.id)); // Select all for custom
+                } else if (involvedMemberIds.length < group.members.length) {
                      setSplitType('unequally');
-                     setSelectedMembers(expense.splits.filter(s => s.amount > 0).map(s => s.memberId));
+                     setSelectedMembers(involvedMemberIds);
+                     setCustomSplits({});
                 } else {
                     setSplitType('equally');
                     setSelectedMembers(group.members.map(m => m.id));
+                    setCustomSplits({});
                 }
             } else {
-                // Adding mode - reset form
+                // --- ADDING MODE ---
                 formRef.current?.reset();
                 setDescription('');
                 setAmount(0);
@@ -128,7 +132,9 @@ export function AddExpenseForm({
     
     const handleSplitTypeChange = (value: string) => {
         setSplitType(value);
-        if (value === 'unequally') {
+        if (value === 'unequally' && (!expense || splitType !== 'unequally')) {
+             setSelectedMembers(group.members.map(m => m.id));
+        } else if (value === 'equally') {
             setSelectedMembers(group.members.map(m => m.id));
         }
     }
